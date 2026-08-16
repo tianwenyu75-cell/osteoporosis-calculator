@@ -1,22 +1,13 @@
 # ============================================================
 # EO-CDSS: Explainable Osteoimmune Clinical Decision Support System
-# Version 2.1（自动适配，无需 joblib）
+# Version 2.2（无外部依赖，纯Streamlit + numpy）
 # ============================================================
 
 import streamlit as st
 import numpy as np
-import pandas as pd
 import base64
 from io import BytesIO
 from datetime import datetime
-import matplotlib.pyplot as plt
-
-# 尝试导入 joblib（如果可用则加载真实模型，否则使用内置系数）
-try:
-    import joblib
-    HAS_JOBLIB = True
-except ImportError:
-    HAS_JOBLIB = False
 
 # ============================================================
 # 页面配置
@@ -29,7 +20,7 @@ st.set_page_config(
 )
 
 # ============================================================
-# 自定义CSS（保持不变，省略...）
+# 自定义CSS（保持不变）
 # ============================================================
 st.markdown("""
 <style>
@@ -75,34 +66,21 @@ if 'result' not in st.session_state:
     st.session_state.result = None
 
 # ============================================================
-# 加载模型（自动适配）
+# 模型系数（直接从你的逻辑回归结果提取）
 # ============================================================
-@st.cache_resource
-def load_models():
-    model = None
-    scaler = None
-    if HAS_JOBLIB:
-        try:
-            model = joblib.load('logistic_model.joblib')
-            scaler = joblib.load('scaler.joblib')
-        except:
-            pass
-    return model, scaler
-
-model, scaler = load_models()
-
-# 特征名称
 FEATURE_NAMES = [
     'BMXBMI', 'RIAGENDR', 'RIDAGEYR', 'RIDRETH1', 'DMDEDUC2',
     'INDFMPIR', 'NPAR', 'SII', 'PLR', 'NLR',
     '吸烟_new', '饮酒_new', '高血压_new', '糖尿病_new', '关节炎_new'
 ]
 
-# 内置系数（备用）
-COEFS_INTERCEPT = -2.135957
+# 截距和系数
+INTERCEPT = -2.135957
 COEFS = [-0.896414, 0.769691, 0.682537, -0.081783, 0.064456,
          -0.104677, 0.259990, 0.018336, -0.047041, -0.075340,
          0.029675, -0.129385, -0.046589, 0.053170, -0.024440]
+
+# 训练集的均值和标准差
 MEANS = [28.696, 1.4788, 63.825, 3.0356, 3.2473, 2.6343,
          13.938, 533.55, 127.88, 2.1958, 0.4990, 0.4693,
          0.5182, 0.1913, 0.4094]
@@ -114,26 +92,29 @@ STDS = [5.6667, 0.4996, 9.2401, 1.1252, 1.3149, 1.5375,
 # 计算函数
 # ============================================================
 def calculate_risk(input_dict):
-    raw_values = [
-        input_dict['bmi'], input_dict['sex'], input_dict['age'],
-        input_dict['race'], input_dict['education'], input_dict['income'],
-        input_dict['npar'], input_dict['sii'], input_dict['plr'], input_dict['nlr'],
-        input_dict['smoking'], input_dict['drinking'], input_dict['hypertension'],
-        input_dict['diabetes'], input_dict['arthritis']
+    # 构建原始值向量（顺序必须与训练时一致）
+    raw = [
+        input_dict['bmi'],
+        input_dict['sex'],
+        input_dict['age'],
+        input_dict['race'],
+        input_dict['education'],
+        input_dict['income'],
+        input_dict['npar'],
+        input_dict['sii'],
+        input_dict['plr'],
+        input_dict['nlr'],
+        input_dict['smoking'],
+        input_dict['drinking'],
+        input_dict['hypertension'],
+        input_dict['diabetes'],
+        input_dict['arthritis']
     ]
-    X_raw = np.array([raw_values])
-    
-    if scaler is not None:
-        X_scaled = scaler.transform(X_raw)[0]
-    else:
-        X_scaled = (X_raw - MEANS) / STDS
-        X_scaled = X_scaled[0]
-    
-    if model is not None:
-        prob = model.predict_proba([X_scaled])[0][1]
-    else:
-        logit = COEFS_INTERCEPT + np.sum(COEFS[i] * X_scaled[i] for i in range(len(FEATURE_NAMES)))
-        prob = 1 / (1 + np.exp(-logit))
+    # 标准化
+    std = [(raw[i] - MEANS[i]) / STDS[i] for i in range(len(raw))]
+    # 计算 logit
+    logit = INTERCEPT + sum(COEFS[i] * std[i] for i in range(len(std)))
+    prob = 1 / (1 + np.exp(-logit))
     return prob
 
 def get_risk_level(prob):
@@ -145,31 +126,25 @@ def get_risk_level(prob):
         return 'Low', '🟢', 'Routine follow-up. Lifestyle optimization recommended.'
 
 def get_shap_contributions(input_dict):
-    raw_values = [
+    raw = [
         input_dict['bmi'], input_dict['sex'], input_dict['age'],
         input_dict['race'], input_dict['education'], input_dict['income'],
         input_dict['npar'], input_dict['sii'], input_dict['plr'], input_dict['nlr'],
         input_dict['smoking'], input_dict['drinking'], input_dict['hypertension'],
         input_dict['diabetes'], input_dict['arthritis']
     ]
-    X_raw = np.array([raw_values])
-    if scaler is not None:
-        X_scaled = scaler.transform(X_raw)[0]
-    else:
-        X_scaled = (X_raw - MEANS) / STDS
-        X_scaled = X_scaled[0]
-    
+    std = [(raw[i] - MEANS[i]) / STDS[i] for i in range(len(raw))]
     display_names = ['BMI', 'Sex (Female)', 'Age', 'Race', 'Education',
                      'Income', 'NPAR', 'SII', 'PLR', 'NLR',
                      'Smoking', 'Drinking', 'Hypertension', 'Diabetes', 'Arthritis']
-    contributions = []
-    for i, (name, display) in enumerate(zip(FEATURE_NAMES, display_names)):
-        contrib = COEFS[i] * X_scaled[i]
-        if abs(contrib) > 0.005:
-            direction = '↑' if contrib > 0 else '↓'
-            contributions.append({'feature': display, 'value': contrib, 'direction': direction, 'abs_value': abs(contrib)})
-    contributions.sort(key=lambda x: x['abs_value'], reverse=True)
-    return contributions[:6]
+    contribs = []
+    for i in range(len(COEFS)):
+        val = COEFS[i] * std[i]
+        if abs(val) > 0.005:
+            direction = '↑' if val > 0 else '↓'
+            contribs.append({'feature': display_names[i], 'value': val, 'direction': direction, 'abs_value': abs(val)})
+    contribs.sort(key=lambda x: x['abs_value'], reverse=True)
+    return contribs[:6]
 
 # ============================================================
 # 页面导航
@@ -205,8 +180,8 @@ def show_home():
     with col3:
         st.markdown("""<div style="text-align:center;padding:1rem;"><div style="font-size:2rem;">📊</div><div style="font-weight:600;color:#1a3a5c;">Clinical Decision Support</div><div style="font-size:0.85rem;color:#7a8fa3;">DXA prioritization</div></div>""", unsafe_allow_html=True)
     st.markdown("---")
-    col_btn1, col_btn2, col_btn3 = st.columns([1, 1.5, 1])
-    with col_btn2:
+    col_btn = st.columns([1, 1.5, 1])
+    with col_btn[1]:
         if st.button("🚀 Start Assessment", use_container_width=True, type="primary"):
             navigate_to('input')
     st.markdown("""
@@ -217,10 +192,10 @@ def show_home():
         clinical picture and local guidelines.
     </div>
     """, unsafe_allow_html=True)
-    st.markdown('<div class="eo-footer">EO-CDSS v2.1 · For research and clinical evaluation purposes only</div>', unsafe_allow_html=True)
+    st.markdown('<div class="eo-footer">EO-CDSS v2.2 · For research and clinical evaluation purposes only</div>', unsafe_allow_html=True)
 
 # ============================================================
-# 输入页（省略，内容与之前相同，保证完整）
+# 输入页
 # ============================================================
 def show_input():
     st.markdown("""
@@ -290,7 +265,7 @@ def show_input():
             navigate_to('result')
 
 # ============================================================
-# 结果页（省略，保留完整功能）
+# 结果页
 # ============================================================
 def show_result():
     st.markdown("""
@@ -355,7 +330,6 @@ def show_result():
     with col1:
         if st.button("🔄 New Assessment", use_container_width=True): navigate_to('input')
     with col2:
-        # 简单PDF下载（不依赖reportlab）
         if st.button("📄 Download Report (TXT)", use_container_width=True):
             text = f"EO-CDSS Report\nGenerated: {datetime.now()}\n\nPatient: Age {data['age']}, {data['sex_display']}, BMI {data['bmi']}\nRisk: {risk_pct:.1f}% ({risk_level})\nRecommendation: {rec}\n\nContributors:\n" + "\n".join([f"{c['feature']}: {c['direction']} ({c['abs_value']:.3f})" for c in contribs]) + "\n\nDisclaimer: This system is for clinical decision-support evaluation only."
             st.download_button("📥 Download TXT", text, file_name=f"EO-CDSS_Report_{datetime.now().strftime('%Y%m%d')}.txt")
