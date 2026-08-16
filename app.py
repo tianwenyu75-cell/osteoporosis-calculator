@@ -17,28 +17,15 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ---------- 模型系数（直接从你论文中提取） ----------
-# 截距和15个特征的系数（标准化后的）
+# ---------- 模型系数 ----------
 INTERCEPT = -2.135957
 COEFS = {
-    'BMXBMI': -0.896414,
-    'RIAGENDR': 0.769691,
-    'RIDAGEYR': 0.682537,
-    'RIDRETH1': -0.081783,
-    'DMDEDUC2': 0.064456,
-    'INDFMPIR': -0.104677,
-    'NPAR': 0.259990,
-    'SII': 0.018336,
-    'PLR': -0.047041,
-    'NLR': -0.075340,
-    '吸烟_new': 0.029675,
-    '饮酒_new': -0.129385,
-    '高血压_new': -0.046589,
-    '糖尿病_new': 0.053170,
-    '关节炎_new': -0.024440
+    'BMXBMI': -0.896414, 'RIAGENDR': 0.769691, 'RIDAGEYR': 0.682537,
+    'RIDRETH1': -0.081783, 'DMDEDUC2': 0.064456, 'INDFMPIR': -0.104677,
+    'NPAR': 0.259990, 'SII': 0.018336, 'PLR': -0.047041, 'NLR': -0.075340,
+    '吸烟_new': 0.029675, '饮酒_new': -0.129385, '高血压_new': -0.046589,
+    '糖尿病_new': 0.053170, '关节炎_new': -0.024440
 }
-
-# 训练集的均值和标准差（标准化参数）
 MEANS = {
     'BMXBMI': 28.696, 'RIAGENDR': 1.4788, 'RIDAGEYR': 63.825,
     'RIDRETH1': 3.0356, 'DMDEDUC2': 3.2473, 'INDFMPIR': 2.6343,
@@ -46,7 +33,6 @@ MEANS = {
     '吸烟_new': 0.4990, '饮酒_new': 0.4693, '高血压_new': 0.5182,
     '糖尿病_new': 0.1913, '关节炎_new': 0.4094
 }
-
 STDS = {
     'BMXBMI': 5.6667, 'RIAGENDR': 0.4996, 'RIDAGEYR': 9.2401,
     'RIDRETH1': 1.1252, 'DMDEDUC2': 1.3149, 'INDFMPIR': 1.5375,
@@ -54,37 +40,22 @@ STDS = {
     '吸烟_new': 0.5000, '饮酒_new': 0.4991, '高血压_new': 0.4997,
     '糖尿病_new': 0.3933, '关节炎_new': 0.4917
 }
-
 FEATURE_NAMES = ['BMXBMI', 'RIAGENDR', 'RIDAGEYR', 'RIDRETH1', 'DMDEDUC2',
                  'INDFMPIR', 'NPAR', 'SII', 'PLR', 'NLR',
                  '吸烟_new', '饮酒_new', '高血压_new', '糖尿病_new', '关节炎_new']
 
-# ---------- 计算函数 ----------
 def calculate_risk(values):
-    # 标准化
-    std = []
-    for name, val in zip(FEATURE_NAMES, values):
-        std.append((val - MEANS[name]) / STDS[name])
-    # 计算logit
-    logit = INTERCEPT
-    for name, s in zip(FEATURE_NAMES, std):
-        logit += COEFS[name] * s
-    # sigmoid
-    prob = 1.0 / (1.0 + math.exp(-logit))
-    return prob
+    std = [(values[i] - MEANS[name]) / STDS[name] for i, name in enumerate(FEATURE_NAMES)]
+    logit = INTERCEPT + sum(COEFS[name] * s for name, s in zip(FEATURE_NAMES, std))
+    return 1.0 / (1.0 + math.exp(-logit))
 
 def get_risk_level(prob):
-    if prob >= 0.30:
-        return "High", "🔴", "Consider DXA and comprehensive assessment"
-    elif prob >= 0.15:
-        return "Moderate", "🟡", "Consider DXA based on additional risk factors"
-    else:
-        return "Low", "🟢", "Routine follow-up. Lifestyle optimization recommended."
+    if prob >= 0.30: return "High", "🔴", "Consider DXA"
+    if prob >= 0.15: return "Moderate", "🟡", "Consider DXA based on risk factors"
+    return "Low", "🟢", "Routine follow-up"
 
 def get_contributions(values):
-    std = []
-    for name, val in zip(FEATURE_NAMES, values):
-        std.append((val - MEANS[name]) / STDS[name])
+    std = [(values[i] - MEANS[name]) / STDS[name] for i, name in enumerate(FEATURE_NAMES)]
     contribs = []
     for name, s, coef in zip(FEATURE_NAMES, std, COEFS.values()):
         c = coef * s
@@ -95,7 +66,6 @@ def get_contributions(values):
     contribs.sort(key=lambda x: abs(x[1]), reverse=True)
     return contribs[:5]
 
-# ---------- 会话状态 ----------
 if 'page' not in st.session_state:
     st.session_state.page = 'home'
 if 'result' not in st.session_state:
@@ -112,20 +82,6 @@ def home():
     st.markdown('<div class="eo-title">🏥 EO-CDSS</div>', unsafe_allow_html=True)
     st.markdown('<div class="eo-subtitle">Explainable Osteoimmune Clinical Decision Support System</div>', unsafe_allow_html=True)
     st.markdown('<div class="eo-subtitle" style="font-size:0.9rem;color:#7a8fa3;">Based on NHANES 2005-2020 · n=10,189 · AUC=0.7891</div>', unsafe_allow_html=True)
-    st.markdown("---")
-    st.markdown("""
-    <div style="display:flex;justify-content:center;gap:20px;margin:2rem 0;flex-wrap:wrap;">
-        <div style="background:white;padding:12px 24px;border-radius:10px;border:1.5px solid #dde7f0;">📋 Routine Variables</div>
-        <span style="color:#8aa3bc;font-size:1.5rem;">→</span>
-        <div style="background:white;padding:12px 24px;border-radius:10px;border:1.5px solid #dde7f0;">🤖 Explainable AI</div>
-        <span style="color:#8aa3bc;font-size:1.5rem;">→</span>
-        <div style="background:white;padding:12px 24px;border-radius:10px;border:1.5px solid #dde7f0;">📊 Clinical Decision</div>
-    </div>
-    """, unsafe_allow_html=True)
-    col1, col2, col3 = st.columns(3)
-    with col1: st.markdown("**📋 Routine Variables**\n\nAge, BMI, Sex, NPAR, CBC")
-    with col2: st.markdown("**🔍 Explainable**\n\nSHAP-based contributions")
-    with col3: st.markdown("**📊 Clinical Decision**\n\nDXA prioritization")
     st.markdown("---")
     if st.button("🚀 Start Assessment", use_container_width=True):
         navigate('input')
@@ -160,8 +116,6 @@ def input_page():
             arth = st.selectbox("Arthritis", ["No", "Yes"])
         st.markdown("---")
         osteo = st.radio("Known Osteopenia?", ["No", "Yes"], index=0, horizontal=True)
-        if osteo == "Yes":
-            st.info("Patients with known osteopenia may benefit from earlier DXA reassessment.")
         if st.form_submit_button("📊 Generate Assessment", use_container_width=True, type="primary"):
             race_map = {"Non-Hispanic White":3, "Non-Hispanic Black":4, "Mexican American":1, "Other Hispanic":2, "Other Race":5}
             edu_map = {"≥ College":3, "High School/GED":2, "< High School":1}
@@ -186,9 +140,10 @@ def input_page():
 def result_page():
     data = st.session_state.data
     prob = st.session_state.result
-    if prob is None:
-        st.warning("No assessment found.")
-        if st.button("Start New"): navigate('home')
+    if not data or prob is None:
+        st.warning("No assessment found. Please complete a new assessment first.")
+        if st.button("🔄 Start New Assessment"):
+            navigate('input')
         return
     risk, icon, rec = get_risk_level(prob)
     pct = prob * 100
@@ -205,7 +160,7 @@ def result_page():
         </div>
     </div>
     """, unsafe_allow_html=True)
-    # 主要贡献
+    # 贡献
     vals = [
         data['bmi'], 1 if data['sex']=="Female" else 0, data['age'],
         3, 2, 2.5, data['npar'], data['sii'], data['plr'], data['nlr'],
@@ -231,12 +186,8 @@ def result_page():
                 </div>
             </div>
             """, unsafe_allow_html=True)
-    else:
-        st.info("No major contributors identified.")
-    # 骨量减少建议
-    if data['osteo'] == "Yes":
+    if data.get('osteo') == "Yes":
         st.info("🦴 **Osteopenia:** Earlier DXA reassessment and individualized preventive management may be considered.")
-    # 临床建议
     st.markdown("### 💡 Clinical Decision Support")
     st.markdown(f"""
     <div class="disclaimer-box">
@@ -251,23 +202,16 @@ def result_page():
     with col1:
         if st.button("🔄 New Assessment", use_container_width=True): navigate('input')
     with col2:
-        # 简单文本报告下载
         txt = f"""EO-CDSS Assessment Report
 Generated: {datetime.now()}
-
 Patient: Age {data['age']}, {data['sex']}, BMI {data['bmi']}
 NPAR: {data['npar']} | NLR: {data['nlr']} | PLR: {data['plr']} | SII: {data['sii']}
-
-Risk: {pct:.1f}% ({risk})
-Recommendation: {rec}
-Known Osteopenia: {data['osteo']}
-
-Contributors:
-{chr(10).join([f'  {name}: {d} ({abs(c):.3f})' for name,c,d in contribs])}
-
-Disclaimer: This system is for clinical decision-support evaluation only.
-Does not replace DXA or physician judgment.
-"""
+Risk: {pct:.1f}% ({risk}) | Recommendation: {rec}
+Known Osteopenia: {data.get('osteo', 'No')}
+Contributors:\n"""
+        for name, c, d in contribs:
+            txt += f"  {name}: {d} ({abs(c):.3f})\n"
+        txt += "\nDisclaimer: This system is for clinical decision-support evaluation only."
         st.download_button("📄 Download Report", txt, file_name=f"EO-CDSS_Report_{datetime.now().strftime('%Y%m%d')}.txt")
 
 # ---------- 路由 ----------
@@ -275,5 +219,5 @@ if st.session_state.page == 'home':
     home()
 elif st.session_state.page == 'input':
     input_page()
-else:
+elif st.session_state.page == 'result':
     result_page()
